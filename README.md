@@ -6,3 +6,5 @@ I initially conceptualized the idea of stacking neural network architectures—o
 This Auto XGBoost Hyperparameter Tuner was my original idea. While I used ChatGPT to generate the initial code, I meticulously reviewed and understood every line.
 
 The tuner is highly adaptable and user-friendly—you can customize iterations, hyperparameters, activation functions, and more. The beauty of this project lies in its flexibility and ease of modification.
+
+I also used the python libraries described in the code.
