@@ -1,5 +1,5 @@
 # -XNH-XGBoost-Neural-Network-Hyper-Parameter-Auto-Tuner
-This is an XGBoost Neural Network Hyperparameter Auto Tuner to optimize the effectiveness of your neural networks.
+This is an XGBoost Guided Neural Network Hyperparameter Auto Tuner to optimize the effectiveness of your neural networks.
 
 I initially conceptualized the idea of stacking neural network architectures—one as the base neural network, and another as a hyperparameter tuner. Later, I realized that XGBoost, one of the top-performing ML models, could be combined effectively with a PyTorch neural network architecture for hyperparameter optimization.
 
