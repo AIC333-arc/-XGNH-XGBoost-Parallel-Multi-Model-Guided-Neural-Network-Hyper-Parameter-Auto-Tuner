@@ -1,0 +1,315 @@
+# ---------- THIS IS THE CLASS FOR THE 3 DIMENSIONAL XGBOOST MODEL -------------
+from xgboost import Booster, DMatrix
+import numpy as np
+
+class XGB3DEnsembleSurrogateConverge:
+    def __init__(self, n_models=100, n_trees=5, max_depth=3, learning_rate=0.1):
+        """
+        n_models: number of hyperparam candidates (ensemble models)
+        n_trees: number of trees per model
+        max_depth: max depth of each tree
+        learning_rate: shrinkage applied to tree outputs
+        """
+        self.n_models = n_models
+        self.n_trees = n_trees
+        self.max_depth = max_depth
+        self.learning_rate = learning_rate
+        
+        # We keep models as list of list of Boosters: models[m][t] is tree t of model m
+        self.models = [[None]*n_trees for _ in range(n_models)]
+        self.base_score = 0.5  # starting prediction for all (can tune later)
+
+    def fit(self, X, y):
+        """
+        X: np.array shape (samples, features)
+        y: np.array shape (samples,)
+        
+        Assumes each row in X corresponds to a hyperparam candidate, so n_models = samples
+        So the dataset must have exactly n_models rows.
+        """
+        assert X.shape[0] == self.n_models, "Number of samples must equal n_models"
+
+        # Initialize predictions: shape (n_models,) - starting point
+        preds = np.full(self.n_models, self.base_score, dtype=np.float64)
+
+        # Prepare DMatrix for each model (each model is one hyperparam config, one sample)
+        dmatrices = [DMatrix(X[i:i+1], label=y[i:i+1]) for i in range(self.n_models)]
+
+        # Residuals init = y - preds
+        residuals = y - preds
+
+        # For each tree index
+        for t in range(self.n_trees):
+            # For each model, train one tree on current residual
+            new_trees = []
+            for m in range(self.n_models):
+                # Use current residual for model m as label
+                dmat = DMatrix(X[m:m+1], label=np.array([residuals[m]]))
+                param = {
+                    'max_depth': self.max_depth,
+                    'eta': self.learning_rate,
+                    'objective': 'reg:squarederror',
+                    'verbosity': 0
+                }
+                # Train a single tree booster for this residual
+                bst = Booster(params=param, cache=[dmat])
+                bst.update(dmat, iteration=0)  # single iteration to grow one tree
+                new_trees.append(bst)
+            
+            # Update models list for tree t
+            for m in range(self.n_models):
+                self.models[m][t] = new_trees[m]
+
+            # Predict all models’ new tree outputs and blend residuals across all models
+            # Extract leaf outputs from each tree to influence residuals cross-model
+            tree_preds = np.zeros(self.n_models)
+
+            for m in range(self.n_models):
+                pred = self.models[m][t].predict(dmatrices[m])
+                tree_preds[m] = pred[0]
+
+            # Now update residuals for next tree using average influence of all tree_preds
+            # This is the "3D blending" interaction step:
+            avg_tree_pred = tree_preds.mean()
+            residuals = residuals - self.learning_rate * avg_tree_pred
+
+            # Also update predictions accordingly
+            preds = preds + self.learning_rate * tree_preds
+
+        self.final_preds = preds
+
+    def predict(self, X):
+        """
+        Predict for input X.
+        For this surrogate, only supports input X that matches n_models (the candidates trained).
+        """
+        assert X.shape[0] == self.n_models, "Predict only supports trained n_models candidates"
+
+        return self.final_preds
+
+# ---------- THIS IS THE CODE FOR THE AUTO TUNER USING THE XGBOOST CLASS -------------
+
+from xgboost import XGBRegressor as xgb
+import random
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import TensorDataset, DataLoader
+from sklearn.model_selection import train_test_split
+import numpy as np
+
+# X, y = ... - input your X and y values here
+
+X_clean = X.dropna()
+
+y_clean = y.loc[X_clean.index]
+
+X_train_full, X_test, y_train_full, y_test = train_test_split(X_clean, y_clean, test_size=0.2, random_state=42)
+X_train, X_val, y_train, y_val = train_test_split(X_train_full, y_train_full, test_size=0.2, random_state=42)
+
+hidden_sizes_1 = list(range(1,512))
+num_hidden_layers_1 = list(range(1, 32))
+batch_size_1 = [2**i for i in range(2, 8) if 2**i < X.shape[0]]  # typically 4,8,...128
+learning_rate_1 = np.logspace(-4, -2, num=1000)
+num_epochs_1 = list(range(20, 100))
+activations = ["relu", "tanh"]
+num_hidden_layers_1 = list(range(1, 30))
+dropout_1 = np.linspace(0, 0.9, num=10)
+
+def build_model(input_size, hidden_size, activation, num_hidden_layers, dropout, output_size):
+ if activation == 'relu':
+      act_fn = nn.ReLU()
+ elif activation == 'tanh':
+    act_fn = nn.Tanh()
+ else:
+    raise ValueError("Unsupported activation: choose 'relu' or 'tanh'")
+
+ layers = []
+ # First hidden layer
+ layers.append(nn.Linear(input_size, hidden_size))
+ layers.append(act_fn)
+ layers.append(nn.Dropout(dropout))
+
+ # Additional hidden layers
+ for z in range(num_hidden_layers - 1):
+     layers.append(nn.Linear(hidden_size, hidden_size))
+     layers.append(act_fn)
+     layers.append(nn.Dropout(dropout))
+
+# Output layer
+ layers.append(nn.Linear(hidden_size, output_size))
+
+ return nn.Sequential(*layers)
+
+def train_and_eval(params, patience=5):
+    model = build_model(X.shape[1],
+                        params["hidden_size"],
+                        params["activation"],
+                        params["num_hidden_layers"],
+                        params["dropout"],
+                        output_size=1)
+
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=params["learning_rate"])
+
+    train_dataset = TensorDataset(torch.tensor(X_train.values, dtype=torch.float32),
+                                  torch.tensor(y_train.values, dtype=torch.float32).unsqueeze(1))
+    train_loader = DataLoader(train_dataset, batch_size=params['batch_size'])
+
+    val_tensor_X = torch.tensor(X_val.values, dtype=torch.float32)
+    val_tensor_y = torch.tensor(y_val.values, dtype=torch.float32)
+
+    best_rmse = float('inf')
+    epochs_no_improve = 0
+    best_model_state = None
+
+    model.train()
+    for epoch in range(params["num_epochs"]):
+        for xb, yb in train_loader:
+            optimizer.zero_grad()
+            preds = model(xb)
+            loss = criterion(preds, yb)
+            loss.backward()
+            optimizer.step()
+
+        # Validation RMSE
+        model.eval()
+        with torch.no_grad():
+            preds = model(val_tensor_X).squeeze(1)
+            mse = ((preds - val_tensor_y) ** 2).mean().item()
+            rmse = mse ** 0.5
+
+        if rmse < best_rmse:
+            best_rmse = rmse
+            epochs_no_improve = 0
+            best_model_state = model.state_dict()
+        else:
+            epochs_no_improve += 1
+
+        if epochs_no_improve >= patience:
+            print(f"Early stopping at epoch {epoch+1}")
+            break
+
+        model.train()
+
+    # Restore best model before returning
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+
+    return best_rmse
+
+def encode_params(df):
+  df_enc = df.copy()
+  df_enc["activation"] = df_enc["activation"].map({"relu" : 0, "tanh" : 1})
+  return df_enc
+
+results_df = pd.DataFrame(columns = [
+    "hidden_size", "learning_rate", "num_epochs", "batch_size", "num_hidden_layers", "activation", "dropout"
+])
+
+hp = {
+    "hidden_size" : random.choice(hidden_sizes_1),
+    "learning_rate" : random.choice(learning_rate_1),
+    "num_epochs" : random.choice(num_epochs_1),
+    "batch_size" : random.choice(batch_size_1),
+    "num_hidden_layers" : random.choice(num_hidden_layers_1),
+    "activation" : random.choice(activations),
+    "dropout" : random.choice(dropout_1),
+}
+
+acc = train_and_eval(hp)
+hp["rmse"] = acc
+results_df = pd.concat([results_df, pd.DataFrame([hp])], ignore_index=True)
+
+print(f"Initial sample: {hp}")
+
+df_enc = encode_params(results_df)
+df_enc = df_enc.apply(pd.to_numeric, errors='coerce').dropna(subset=['rmse', 'batch_size'])
+
+
+X_train_surrogate = df_enc.drop(columns=["rmse"])
+y_train_surrogate = df_enc["rmse"]
+
+# Prepare encoded hyperparameter candidates X_train_surrogate (shape = n_samples x features)
+# And target y_train_surrogate (rmse for each candidate)
+
+# Make sure n_models = number of samples in X_train_surrogate
+n_models = X_train_surrogate.shape[0]
+n_trees = 100  # tune as you want
+
+surrogate = XGB3DEnsembleSurrogateConverge(n_models=n_models, n_trees=n_trees)
+surrogate.fit(X_train_surrogate.values, y_train_surrogate.values)
+
+# Predict error for all training candidates
+preds = surrogate.predict(X_train_surrogate.values)
+
+# Find best candidate with lowest predicted error
+best_idx = np.argmin(preds)
+best_hp_row = X_train_surrogate.iloc[best_idx]
+activation_map = {0: "relu", 1: "tanh"}
+best_hp = best_hp_row.to_dict()
+best_hp["activation"] = activation_map.get(best_hp["activation"], "relu")
+
+
+print("Best hyperparameters predicted by 3D ensemble surrogate:")
+print(best_hp_row)
+print(f"Predicted RMSE: {preds[best_idx]:.4f}")
+
+lr = best_hp["learning_rate"]
+hs = best_hp["hidden_size"]
+ne = best_hp["num_epochs"]
+bs = best_hp["batch_size"]
+nhl = best_hp["num_hidden_layers"]
+act = best_hp["activation"]
+drop = best_hp["dropout"]
+
+
+# --- YOU: Set your hyperparameters here ---
+hidden_size = int(hs)
+num_epochs = int(ne)
+num_hidden_layers = int(nhl)
+batch_size = int(bs)
+learning_rate = float(lr)
+dropout = float(drop)
+activation = act  # keep string
+
+train_ds = TensorDataset(torch.tensor(X_train.values, dtype=torch.float32),
+                         torch.tensor(y_train.values, dtype=torch.float32).unsqueeze(1))
+train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+
+# --- Final Evaluation on the test set ---
+model = build_model(X.shape[1], hidden_size, activation, num_hidden_layers, dropout, output_size=1)
+optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+criterion = nn.MSELoss()
+
+train_ds = TensorDataset(torch.tensor(X_train.values, dtype=torch.float32),
+                         torch.tensor(y_train.values, dtype=torch.float32).unsqueeze(1))
+hidden_size = int(hs)
+num_epochs = int(ne)
+num_hidden_layers = int(nhl)
+batch_size = int(bs)
+learning_rate = float(lr)  # keep as float
+dropout = float(drop)      # keep as float
+activation = act           # string or int depending on your encoding
+train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+
+# Train on full training set (no early stopping here)
+model.train()
+for epoch in range(num_epochs):
+    for xb, yb in train_loader:
+        optimizer.zero_grad()
+        preds = model(xb)
+        loss = criterion(preds, yb)
+        loss.backward()
+        optimizer.step()
+
+# Evaluate on the untouched test set
+model.eval()
+with torch.no_grad():
+    X_test_tensor = torch.tensor(X_test.values, dtype=torch.float32)
+    y_test_tensor = torch.tensor(y_test.values, dtype=torch.float32)
+    preds = model(X_test_tensor).squeeze(1)
+    mse = ((preds - y_test_tensor) ** 2).mean().item()
+    rmse = mse ** 0.5
+
+print(f"Final RMSE on test set: {rmse:.4f}")
