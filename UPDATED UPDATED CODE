@@ -1,0 +1,335 @@
+import numpy as np
+import pandas as pd
+import random
+from joblib import Parallel, delayed
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.model_selection import train_test_split
+
+from xgboost import Booster, DMatrix
+
+import numpy as np
+import torch
+from xgboost import DMatrix, Booster
+from concurrent.futures import ThreadPoolExecutor
+import threading
+from xgboost.core import XGBoostError
+
+import numpy as np
+import torch
+from xgboost import DMatrix, Booster
+from concurrent.futures import ThreadPoolExecutor
+import threading
+from xgboost.core import XGBoostError
+
+import numpy as np
+import threading
+from xgboost import DMatrix, Booster
+from xgboost.core import XGBoostError
+from concurrent.futures import ThreadPoolExecutor
+
+class XGB3DEnsembleSurrogateConverge:
+    def __init__(self, n_models=30, n_trees=100, max_depth=3, learning_rate=0.1, batch_size=1):
+        self.n_models = n_models
+        self.n_trees = n_trees
+        self.max_depth = max_depth
+        self.learning_rate = learning_rate
+        self.batch_size = batch_size
+        self.models = [[None] * n_trees for _ in range(n_models)]
+        self.base_score = 0.5
+        self.lock = threading.Lock()
+
+        self.hp_ranges = {
+            'hidden_size': (16, 512),
+            'learning_rate': (1e-4, 1e-2),
+            'num_epochs': (20, 100),
+            'batch_size': (4, 128),
+            'num_layers': (1, 16),
+            'activation': (0, 1),
+            'dropout': (0.0, 0.5)
+        }
+
+    def fit(self, X, y):
+        X = np.array(X, dtype=np.float32)
+        y = np.array(y, dtype=np.float32)
+        n_samples = X.shape[0]
+        self.X = X
+        self.y = y
+        self.model_preds = np.full((self.n_models, n_samples), self.base_score, dtype=np.float32)
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        try:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            if device == "cuda":
+                X_gpu = torch.tensor(X, device="cuda")
+                y_gpu = torch.tensor(y, device="cuda")
+                model_preds_gpu = torch.tensor(self.model_preds, device="cuda")
+            else:
+                X_gpu = X
+                y_gpu = y
+                model_preds_gpu = self.model_preds
+        except RuntimeError as e:
+            print(f"CUDA error: {e}. Falling back to CPU.")
+            device = "cpu"
+            X_gpu = X
+            y_gpu = y
+            model_preds_gpu = self.model_preds
+
+        def train_tree_for_model(m, t, shared_residuals):
+            try:
+                dmat = DMatrix(X_gpu, label=shared_residuals)
+                params = {
+                    "max_depth": self.max_depth,
+                    "eta": self.learning_rate,
+                    "objective": "reg:squarederror",
+                    "base_score": 0,
+                    "verbosity": 0,
+                    "device": "cuda" if device == "cuda" else "cpu",
+                    "tree_method": "hist"
+                }
+                bst = Booster(params, [dmat])
+                bst.update(dmat, iteration=0)
+                pred = bst.predict(DMatrix(X_gpu))
+                return m, t, bst, pred
+            except XGBoostError as e:
+                if "cudaErrorMemoryAllocation" in str(e):
+                    raise RuntimeError("GPU out of memory during tree training")
+                raise e
+
+        for t in range(self.n_trees):
+            ensemble_preds = np.mean(self.model_preds, axis=0)
+            shared_residuals = y - ensemble_preds
+
+            for batch_start in range(0, self.n_models, self.batch_size):
+                batch_end = min(batch_start + self.batch_size, self.n_models)
+                results = []
+                try:
+                    with ThreadPoolExecutor(max_workers=self.batch_size) as executor:
+                        futures = [
+                            executor.submit(train_tree_for_model, m, t, shared_residuals)
+                            for m in range(batch_start, batch_end)
+                        ]
+                        for future in futures:
+                            results.append(future.result())
+                except RuntimeError as e:
+                    if "GPU out of memory" in str(e):
+                        print(f"GPU out of memory in batch {batch_start}-{batch_end}. Switching to CPU.")
+                        device = "cpu"
+                        X_gpu = X
+                        shared_residuals = y - ensemble_preds
+                        results = [train_tree_for_model(m, t, shared_residuals) for m in range(batch_start, batch_end)]
+
+                for m, t, bst, pred in results:
+                    with self.lock:
+                        self.models[m][t] = bst
+                        self.model_preds[m] += self.learning_rate * pred
+
+        self.final_preds = np.mean(self.model_preds, axis=0)
+
+    def predict(self, X_new, force_cpu=False):
+        X_new = np.array(X_new, dtype=np.float32)
+        device = "cuda" if torch.cuda.is_available() and not force_cpu else "cpu"
+
+        if device == "cuda":
+            try:
+                X_new_gpu = torch.tensor(X_new, device="cuda")
+                dmatrix_new = DMatrix(X_new_gpu)
+            except RuntimeError:
+                device = "cpu"
+                dmatrix_new = DMatrix(X_new)
+        else:
+            dmatrix_new = DMatrix(X_new)
+
+        preds = np.full((self.n_models, X_new.shape[0]), self.base_score, dtype=np.float32)
+
+        for t in range(self.n_trees):
+            for m in range(self.n_models):
+                preds[m] += self.learning_rate * self.models[m][t].predict(dmatrix_new)
+
+        return np.mean(preds, axis=0)
+
+    def search(self, n_candidates=10000):
+        candidates = []
+        for _ in range(n_candidates):
+            candidate = [
+                random.randint(*self.hp_ranges['hidden_size']),
+                random.uniform(*self.hp_ranges['learning_rate']),
+                random.randint(*self.hp_ranges['num_epochs']),
+                random.randint(*self.hp_ranges['batch_size']),
+                random.randint(*self.hp_ranges['num_layers']),
+                random.choice([0, 1]),
+                random.uniform(*self.hp_ranges['dropout'])
+            ]
+            candidates.append(candidate)
+
+        candidates = np.array(candidates, dtype=np.float32)
+
+        # Force CPU here to avoid GPU memory issues
+        preds = self.predict(candidates, force_cpu=True)
+        best_idx = np.argmin(preds)
+        best_candidate = candidates[best_idx]
+
+        keys = list(self.hp_ranges.keys())
+        hp_config = dict(zip(keys, best_candidate))
+        hp_config['activation'] = "relu" if hp_config['activation'] == 0 else "tanh"
+        hp_config['predicted_rmse'] = preds[best_idx]
+
+        return hp_config
+# --------------------- Neural Network AutoTuner ---------------------
+def build_model(input_size, hidden_size, activation, num_layers, dropout, output_size=1):
+    act_fn = nn.ReLU() if activation == "relu" or activation == 0 else nn.Tanh()
+    layers = [nn.Linear(input_size, hidden_size), act_fn, nn.Dropout(dropout)]
+    for _ in range(num_layers - 1):
+        layers += [nn.Linear(hidden_size, hidden_size), act_fn, nn.Dropout(dropout)]
+    layers += [nn.Linear(hidden_size, output_size)]
+    return nn.Sequential(*layers)
+
+def train_and_eval(hp, X_train, y_train, X_val, y_val, patience=5):
+    model = build_model(X_train.shape[1], hp["hidden_size"], hp["activation"],
+                        hp["num_layers"], hp["dropout"])
+    optimizer = optim.Adam(model.parameters(), lr=hp["learning_rate"])
+    criterion = nn.MSELoss()
+
+    train_ds = TensorDataset(torch.tensor(X_train.values, dtype=torch.float32),
+                             torch.tensor(y_train.values, dtype=torch.float32).unsqueeze(1))
+    train_loader = DataLoader(train_ds, batch_size=hp["batch_size"], shuffle=True)
+
+    val_X_tensor = torch.tensor(X_val.values, dtype=torch.float32)
+    val_y_tensor = torch.tensor(y_val.values, dtype=torch.float32)
+
+    best_rmse = float("inf")
+    best_state = None
+    epochs_no_improve = 0
+
+    for epoch in range(hp["num_epochs"]):
+        model.train()
+        for xb, yb in train_loader:
+            optimizer.zero_grad()
+            pred = model(xb)
+            loss = criterion(pred, yb)
+            loss.backward()
+            optimizer.step()
+
+        model.eval()
+        with torch.no_grad():
+            val_pred = model(val_X_tensor).squeeze()
+            mse = ((val_pred - val_y_tensor)**2).mean().item()
+            rmse = mse ** 0.5
+            if rmse < best_rmse:
+                best_rmse = rmse
+                best_state = model.state_dict()
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
+
+        if epochs_no_improve >= patience:
+            break
+
+    if best_state:
+        model.load_state_dict(best_state)
+
+    return best_rmse
+
+
+# --------------------- Main AutoML Script ---------------------
+
+# --- Replace with your data ---
+# X, y = ...
+
+X_clean = X.dropna()
+y_clean = y.loc[X_clean.index]
+
+X_train_full, X_test, y_train_full, y_test = train_test_split(X_clean, y_clean, test_size=0.2, random_state=42)
+X_train, X_val, y_train, y_val = train_test_split(X_train_full, y_train_full, test_size=0.2, random_state=42)
+
+# Hyperparameter ranges
+hidden_sizes = list(range(16, 512))
+num_layers = list(range(1, 16))
+batch_sizes = [2**i for i in range(2, 8) if 2**i < X.shape[0]]
+learning_rates = np.logspace(-4, -2, 1000)
+epochs = list(range(20, 100))
+activations = ["relu", "tanh"]
+dropouts = np.linspace(0.0, 0.5, 6)
+
+# Sample multiple configurations
+results = []
+n_samples = 30
+for _ in range(n_samples):
+    hp = {
+        "hidden_size": random.choice(hidden_sizes),
+        "learning_rate": random.choice(learning_rates),
+        "num_epochs": random.choice(epochs),
+        "batch_size": random.choice(batch_sizes),
+        "num_layers": random.choice(num_layers),
+        "activation": random.choice(activations),
+        "dropout": random.choice(dropouts)
+    }
+    rmse = train_and_eval(hp, X_train, y_train, X_val, y_val)
+    hp["rmse"] = rmse
+    results.append(hp)
+
+df = pd.DataFrame(results)
+
+def encode_params(df):
+    df_enc = df.copy()
+    df_enc["activation"] = df_enc["activation"].map({"relu": 0, "tanh": 1})
+    return df_enc
+
+df_enc = encode_params(df).dropna()
+X_surrogate = df_enc.drop(columns=["rmse"]).astype(float)
+y_surrogate = df_enc["rmse"].values
+
+# Train the surrogate
+surrogate = XGB3DEnsembleSurrogateConverge(n_models=30, n_trees=100)
+# Train the surrogate
+surrogate = XGB3DEnsembleSurrogateConverge(n_models=30, n_trees=100)
+surrogate.fit(X_surrogate.values, y_surrogate)
+
+# Use surrogate to search over 10,000 candidates
+best_hp = surrogate.search(n_candidates=10000)
+
+print("\nBest hyperparameters found by surrogate search:")
+print(best_hp)
+
+# Convert activation string to index (0 or 1) for build_model
+activation_idx = 0 if best_hp['activation'] == 'relu' else 1
+
+# Train final model on full training data using best hyperparameters
+model = build_model(
+    input_size=X_train_full.shape[1],
+    hidden_size=int(best_hp["hidden_size"]),
+    activation=activation_idx,
+    num_layers=int(best_hp["num_layers"]),
+    dropout=float(best_hp["dropout"])
+)
+optimizer = optim.Adam(model.parameters(), lr=float(best_hp["learning_rate"]))
+criterion = nn.MSELoss()
+
+train_ds = TensorDataset(torch.tensor(X_train_full.values, dtype=torch.float32),
+                         torch.tensor(y_train_full.values, dtype=torch.float32).unsqueeze(1))
+train_loader = DataLoader(train_ds, batch_size=int(best_hp["batch_size"]), shuffle=True)
+
+model.train()
+for epoch in range(int(best_hp["num_epochs"])):
+    for xb, yb in train_loader:
+        optimizer.zero_grad()
+        pred = model(xb)
+        loss = criterion(pred, yb)
+        loss.backward()
+        optimizer.step()
+
+# Final evaluation on test set
+model.eval()
+with torch.no_grad():
+    X_test_tensor = torch.tensor(X_test.values, dtype=torch.float32)
+    y_test_tensor = torch.tensor(y_test.values, dtype=torch.float32)
+    preds = model(X_test_tensor).squeeze()
+    mse = ((preds - y_test_tensor) ** 2).mean().item()
+    rmse = mse ** 0.5
+
+print(f"\n✅ Final RMSE on test set: {rmse:.4f}")
