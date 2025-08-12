@@ -8,34 +8,10 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
-
 from xgboost import Booster, DMatrix
-
-import numpy as np
-import torch
-from xgboost import DMatrix, Booster
 from concurrent.futures import ThreadPoolExecutor
 import threading
 from xgboost.core import XGBoostError
-
-import numpy as np
-import torch
-from xgboost import DMatrix, Booster
-from concurrent.futures import ThreadPoolExecutor
-import threading
-from xgboost.core import XGBoostError
-
-import numpy as np
-import threading
-from xgboost import DMatrix, Booster
-from xgboost.core import XGBoostError
-from concurrent.futures import ThreadPoolExecutor
-
-import numpy as np
-import threading
-from xgboost import DMatrix, Booster
-from xgboost.core import XGBoostError
-from concurrent.futures import ThreadPoolExecutor
 
 class XGB3DEnsembleSurrogateConverge:
     def __init__(self, n_models=30, n_trees=100, max_depth=3, learning_rate=0.1, batch_size=1, residual_learning_rate=0.1):
