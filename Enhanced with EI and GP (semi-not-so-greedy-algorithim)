@@ -1,0 +1,459 @@
+# Still need to do some more research. I developed the idea but need to work on the math. GPT coded.
+
+import numpy as np
+import threading
+import random
+from concurrent.futures import ThreadPoolExecutor
+from xgboost import DMatrix, Booster
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import ConstantKernel as C, Matern, WhiteKernel
+from scipy.stats import norm
+import warnings
+import matplotlib.pyplot as plt
+
+warnings.simplefilter("ignore", category=UserWarning)
+warnings.simplefilter("ignore", category=RuntimeWarning)
+
+class XGB3DEnsembleSurrogateConverge:
+    def __init__(self, n_models=30, n_trees=100, max_depth=3, learning_rate=0.1, batch_size=1, residual_learning_rate=0.1):
+        self.n_models = n_models
+        self.n_trees = n_trees
+        self.max_depth = max_depth
+        self.learning_rate = learning_rate
+        self.batch_size = batch_size
+        self.residual_learning_rate = residual_learning_rate
+
+        self.models = [[None] * n_trees for _ in range(n_models)]
+        self.base_score = 0.5
+        self.lock = threading.Lock()
+
+        self.hp_ranges = {
+            'hidden_size': (16, 512),
+            'learning_rate': (1e-4, 1e-2),
+            'num_epochs': (20, 100),
+            'batch_size': (4, 128),
+            'num_layers': (1, 16),
+            'activation': (0, 1),  # 0=relu, 1=tanh
+            'dropout': (0.0, 0.5)
+        }
+
+    # ------------------- Ensemble Training -------------------
+    def fit(self, X, y):
+        self.X = np.array(X, dtype=np.float32)
+        self.y = np.array(y, dtype=np.float32)
+        n_samples = self.X.shape[0]
+        self.model_preds = np.full((self.n_models, n_samples), self.base_score, dtype=np.float32)
+        residuals = np.zeros((self.n_models, n_samples), dtype=np.float32)
+
+        def train_tree(m, t, res):
+            dmat = DMatrix(self.X, label=res)
+            params = {
+                "max_depth": self.max_depth,
+                "eta": self.learning_rate,
+                "objective": "reg:squarederror",
+                "verbosity": 0,
+                "tree_method": "hist"
+            }
+            bst = Booster(params, [dmat])
+            bst.update(dmat, iteration=0)
+            pred = bst.predict(dmat)
+            return m, t, bst, pred
+
+        for t in range(self.n_trees):
+            ensemble_preds = np.mean(self.model_preds, axis=0)
+            shared_residuals = self.y - ensemble_preds
+
+            for batch_start in range(0, self.n_models, self.batch_size):
+                batch_end = min(batch_start + self.batch_size, self.n_models)
+                results = []
+                with ThreadPoolExecutor(max_workers=self.batch_size) as executor:
+                    futures = [executor.submit(train_tree, m, t, residuals[m]) for m in range(batch_start, batch_end)]
+                    for f in futures:
+                        results.append(f.result())
+
+                for m, t_idx, bst, pred in results:
+                    with self.lock:
+                        self.models[m][t_idx] = bst
+                        self.model_preds[m] += self.learning_rate * pred
+                        residuals[m] = np.clip(
+                            residuals[m] - self.learning_rate * pred + self.residual_learning_rate * shared_residuals,
+                            -1e6, 1e6
+                        )
+        self.final_preds = np.mean(self.model_preds, axis=0)
+
+    # ------------------- GP + EI Computations -------------------
+    def compute_gp(self):
+        y_preds = np.mean(self.model_preds, axis=0)
+        kernel = C(1.0, (1e-3, 1e3)) * Matern(length_scale=1.0, nu=2.5) + WhiteKernel(noise_level=1e-6)
+        gp = GaussianProcessRegressor(kernel=kernel, normalize_y=True)
+        gp.fit(self.X, y_preds)
+        mu, sigma = gp.predict(self.X, return_std=True)
+        return mu, sigma, gp
+
+    def compute_gp_on_candidates(self, X_candidates, gp=None):
+        if gp is None:
+            _, _, gp = self.compute_gp()
+        mu, sigma = gp.predict(X_candidates, return_std=True)
+        return mu, sigma
+
+    def expected_improvement(self, X_candidates, xi=0.01, top_k_fraction=0.05, greediness=2.0):
+        mu, sigma, gp = self.compute_gp()
+        y_best = np.min(np.mean(self.model_preds, axis=0))
+        mu_cand, sigma_cand = self.compute_gp_on_candidates(X_candidates, gp)
+
+        with np.errstate(divide='warn'):
+            z = (y_best - mu_cand - xi) / sigma_cand
+            ei = (y_best - mu_cand - xi) * norm.cdf(z) + sigma_cand * norm.pdf(z)
+            ei[sigma_cand == 0.0] = 0.0
+
+        # Semi-greedy selection: take top candidates only
+        k = max(1, int(len(ei) * top_k_fraction))
+        top_idx = np.argpartition(-ei, k)[:k]
+
+        # Skew probabilities to favor top EI candidates
+        top_ei = ei[top_idx]
+        probs = np.power(top_ei, greediness)
+        probs /= np.sum(probs)
+
+        chosen_idx = np.random.choice(top_idx, p=probs)
+        return ei, chosen_idx
+
+    def search(self, n_candidates=100000):
+        candidates = []
+        for _ in range(n_candidates):
+            candidate = {
+                "hidden_size": random.randint(*self.hp_ranges['hidden_size']),
+                "learning_rate": random.uniform(*self.hp_ranges['learning_rate']),
+                "num_epochs": random.randint(*self.hp_ranges['num_epochs']),
+                "batch_size": random.randint(*self.hp_ranges['batch_size']),
+                "num_layers": random.randint(*self.hp_ranges['num_layers']),
+                "activation": random.choice(["relu", "tanh"]),
+                "dropout": random.uniform(*self.hp_ranges['dropout'])
+            }
+            candidates.append(candidate)
+
+        X_candidates = np.array([
+            [c["hidden_size"], c["learning_rate"], c["num_epochs"], c["batch_size"],
+             c["num_layers"], 0 if c["activation"]=="relu" else 1, c["dropout"]]
+            for c in candidates
+        ], dtype=np.float32)
+
+        _, chosen_idx = self.expected_improvement(X_candidates)
+        return candidates[chosen_idx]  # ✅ Now only returns dict
+
+    # ------------------- Predictions -------------------
+    def predict(self, X_new):
+        X_new = np.array(X_new, dtype=np.float32)
+        preds = np.full((self.n_models, X_new.shape[0]), self.base_score, dtype=np.float32)
+        dmat_new = DMatrix(X_new)
+        for t in range(self.n_trees):
+            for m in range(self.n_models):
+                preds[m] += self.learning_rate * self.models[m][t].predict(dmat_new)
+        return np.mean(preds, axis=0)
+
+    # ------------------- Visualizations -------------------
+    def plot_gp_fit(self):
+        mu, sigma, _ = self.compute_gp()
+        y_true = np.mean(self.model_preds, axis=0)
+        plt.figure(figsize=(10,6))
+        plt.plot(y_true, y_true, 'k--', label='Ideal Fit')
+        plt.scatter(y_true, mu, c='blue', alpha=0.6, label='GP Mean')
+        plt.fill_between(y_true, mu - 2*sigma, mu + 2*sigma, color='orange', alpha=0.3, label='±2 Std Dev')
+        plt.xlabel('Ensemble Predictions')
+        plt.ylabel('GP Predicted Mean')
+        plt.title('GP Fit vs Ensemble Predictions')
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+    def plot_gp_uncertainty(self):
+        mu, sigma, _ = self.compute_gp()
+        y_preds = np.mean(self.model_preds, axis=0)
+        plt.figure(figsize=(10,6))
+        plt.scatter(y_preds, sigma, c='purple', alpha=0.6)
+        plt.xlabel('Ensemble Predictions')
+        plt.ylabel('GP Uncertainty (Std Dev)')
+        plt.title('GP Uncertainty vs Ensemble Predictions')
+        plt.grid(True)
+        plt.show()
+
+    def plot_residuals(self):
+        mu, _, _ = self.compute_gp()
+        y_true = np.mean(self.model_preds, axis=0)
+        residuals = y_true - mu
+        plt.figure(figsize=(10,6))
+        plt.scatter(y_true, residuals, c='red', alpha=0.6)
+        plt.axhline(0, color='black', linestyle='--')
+        plt.xlabel('Ensemble Predictions')
+        plt.ylabel('Residuals (True - GP Mean)')
+        plt.title('GP Residuals')
+        plt.grid(True)
+        plt.show()
+
+    def plot_expected_improvement(self, X_candidates=None):
+        if X_candidates is None:
+            X_candidates = self.X
+        ei, _ = self.expected_improvement(X_candidates, top_k_fraction=0.2)
+        plt.figure(figsize=(10,6))
+        if X_candidates.shape[1] == 1:
+            plt.plot(X_candidates[:,0], ei, 'o-', alpha=0.7)
+            plt.xlabel('Candidate Feature 0')
+        elif X_candidates.shape[1] == 2:
+            plt.tricontourf(X_candidates[:,0], X_candidates[:,1], ei, cmap='viridis')
+            plt.xlabel('Candidate Feature 0')
+            plt.ylabel('Candidate Feature 1')
+            plt.colorbar(label='Expected Improvement')
+        else:
+            plt.plot(range(len(ei)), ei, 'o-', alpha=0.7)
+            plt.xlabel('Candidate Index')
+        plt.ylabel('Expected Improvement')
+        plt.title('Expected Improvement Across Candidates')
+        plt.grid(True)
+        plt.show()
+
+# --------------------- Neural Network AutoTuner ---------------------
+def build_model(input_size, hidden_size, activation, num_layers, dropout, output_size=1):
+    act_fn = nn.ReLU() if activation == "relu" or activation == 0 else nn.Tanh()
+    layers = [nn.Linear(input_size, hidden_size), act_fn, nn.Dropout(dropout)]
+    for _ in range(num_layers - 1):
+        layers += [nn.Linear(hidden_size, hidden_size), act_fn, nn.Dropout(dropout)]
+    layers += [nn.Linear(hidden_size, output_size)]
+    return nn.Sequential(*layers)
+
+def train_and_eval(hp, X_train, y_train, X_val, y_val, patience=5):
+    model = build_model(X_train.shape[1], hp["hidden_size"], hp["activation"],
+                        hp["num_layers"], hp["dropout"])
+    optimizer = optim.Adam(model.parameters(), lr=hp["learning_rate"])
+    criterion = nn.MSELoss()
+
+    train_ds = TensorDataset(torch.tensor(X_train.values, dtype=torch.float32),
+                             torch.tensor(y_train.values, dtype=torch.float32).unsqueeze(1))
+    train_loader = DataLoader(train_ds, batch_size=hp["batch_size"], shuffle=True)
+
+    val_X_tensor = torch.tensor(X_val.values, dtype=torch.float32)
+    val_y_tensor = torch.tensor(y_val.values, dtype=torch.float32)
+
+    best_rmse = float("inf")
+    best_state = None
+    epochs_no_improve = 0
+
+    for epoch in range(hp["num_epochs"]):
+        model.train()
+        for xb, yb in train_loader:
+            optimizer.zero_grad()
+            pred = model(xb)
+            loss = criterion(pred, yb)
+            loss.backward()
+            optimizer.step()
+
+        model.eval()
+        with torch.no_grad():
+            val_pred = model(val_X_tensor).squeeze()
+            mse = ((val_pred - val_y_tensor)**2).mean().item()
+            rmse = mse ** 0.5
+            if rmse < best_rmse:
+                best_rmse = rmse
+                best_state = model.state_dict()
+                epochs_no_improve = 0
+            else:
+                epochs_no_improve += 1
+
+        if epochs_no_improve >= patience:
+            break
+
+    if best_state:
+        model.load_state_dict(best_state)
+
+    return best_rmse
+
+
+# --------------------- Main AutoML Script ---------------------
+
+# --- Replace with your data ---
+# X, y = ...
+
+X_clean = X.dropna()
+y_clean = y.loc[X_clean.index]
+
+X_train_full, X_test, y_train_full, y_test = train_test_split(X_clean, y_clean, test_size=0.2, random_state=42)
+X_train, X_val, y_train, y_val = train_test_split(X_train_full, y_train_full, test_size=0.2, random_state=42)
+
+# Hyperparameter ranges
+hidden_sizes = list(range(16, 512))
+num_layers = list(range(1, 16))
+batch_sizes = [2**i for i in range(2, 8) if 2**i < X.shape[0]]
+learning_rates = np.logspace(-4, -2, 1000)
+epochs = list(range(20, 100))
+activations = ["relu", "tanh"]
+dropouts = np.linspace(0.0, 0.5, 6)
+
+# Sample multiple configurations
+results = []
+n_samples = 50
+for _ in range(n_samples):
+    hp = {
+        "hidden_size": random.choice(hidden_sizes),
+        "learning_rate": random.choice(learning_rates),
+        "num_epochs": random.choice(epochs),
+        "batch_size": random.choice(batch_sizes),
+        "num_layers": random.choice(num_layers),
+        "activation": random.choice(activations),
+        "dropout": random.choice(dropouts)
+    }
+    rmse = train_and_eval(hp, X_train, y_train, X_val, y_val)
+    hp["rmse"] = rmse
+    results.append(hp)
+
+df = pd.DataFrame(results)
+
+def encode_params(df):
+    df_enc = df.copy()
+    df_enc["activation"] = df_enc["activation"].map({"relu": 0, "tanh": 1})
+    return df_enc
+
+df_enc = encode_params(df).dropna()
+X_surrogate = df_enc.drop(columns=["rmse"]).astype(float)
+y_surrogate = df_enc["rmse"].values
+
+# Train the surrogate
+surrogate = XGB3DEnsembleSurrogateConverge(n_models=30, n_trees=100)
+# Train the surrogate
+surrogate = XGB3DEnsembleSurrogateConverge(n_models=30, n_trees=100)
+surrogate.fit(X_surrogate.values, y_surrogate)
+
+# Use surrogate to search over 10,000 candidates
+best_hp = surrogate.search(n_candidates=10000)
+
+print("\nBest hyperparameters found by surrogate search:")
+print(best_hp)
+
+# Convert activation string to index (0 or 1) for build_model
+activation_idx = 0 if best_hp['activation'] == 'relu' else 1
+
+# Train final model on full training data using best hyperparameters
+model = build_model(
+    input_size=X_train_full.shape[1],
+    hidden_size=int(best_hp["hidden_size"]),
+    activation=activation_idx,
+    num_layers=int(best_hp["num_layers"]),
+    dropout=float(best_hp["dropout"])
+)
+optimizer = optim.Adam(model.parameters(), lr=float(best_hp["learning_rate"]))
+criterion = nn.MSELoss()
+
+train_ds = TensorDataset(torch.tensor(X_train_full.values, dtype=torch.float32),
+                         torch.tensor(y_train_full.values, dtype=torch.float32).unsqueeze(1))
+train_loader = DataLoader(train_ds, batch_size=int(best_hp["batch_size"]), shuffle=True)
+
+model.train()
+for epoch in range(int(best_hp["num_epochs"])):
+    for xb, yb in train_loader:
+        optimizer.zero_grad()
+        pred = model(xb)
+        loss = criterion(pred, yb)
+        loss.backward()
+        optimizer.step()
+
+# Final evaluation on test set
+model.eval()
+with torch.no_grad():
+    X_test_tensor = torch.tensor(X_test.values, dtype=torch.float32)
+    y_test_tensor = torch.tensor(y_test.values, dtype=torch.float32)
+    preds = model(X_test_tensor).squeeze()
+    mse = ((preds - y_test_tensor) ** 2).mean().item()
+    rmse = mse ** 0.5
+
+print(f"\n✅ Final RMSE on test set: {rmse:.4f}")
+
+# 1. GP fit vs ensemble predictions
+surrogate.plot_gp_fit()
+
+# 2. GP uncertainty
+surrogate.plot_gp_uncertainty()
+
+# 3. GP residuals
+surrogate.plot_residuals()
+
+# 4. Expected Improvement across candidates
+# You can pass your candidate space or training X
+surrogate.plot_expected_improvement(X_surrogate.values)
+
+from mpl_toolkits.mplot3d import Axes3D  # for 3D surface
+def plot_everything_enhanced(surrogate, X_surrogate, y_surrogate, X_test_tensor, y_test_tensor, preds, rmse):
+    # === Surrogate GP diagnostics ===
+    surrogate.plot_gp_fit()
+    surrogate.plot_gp_uncertainty()
+    surrogate.plot_residuals()
+    surrogate.plot_expected_improvement(X_surrogate.values)
+
+    # === 3D GP Surface (first 2 features only) ===
+    mu, sigma, gp = surrogate.compute_gp()
+    f1, f2 = 0, 1
+    grid_size = 50
+    f1_vals = np.linspace(X_surrogate.values[:,f1].min(), X_surrogate.values[:,f1].max(), grid_size)
+    f2_vals = np.linspace(X_surrogate.values[:,f2].min(), X_surrogate.values[:,f2].max(), grid_size)
+    F1, F2 = np.meshgrid(f1_vals, f2_vals)
+
+    grid_points = np.zeros((grid_size*grid_size, X_surrogate.shape[1]))
+    for i in range(grid_points.shape[1]):
+        if i == f1:
+            grid_points[:,i] = F1.ravel()
+        elif i == f2:
+            grid_points[:,i] = F2.ravel()
+        else:
+            grid_points[:,i] = np.mean(X_surrogate.values[:,i])
+
+    mu_grid, sigma_grid = gp.predict(grid_points, return_std=True)
+    MU = mu_grid.reshape(F1.shape)
+    SIGMA = sigma_grid.reshape(F1.shape)
+
+    # --- 3D Surface with contour projections ---
+    fig = plt.figure(figsize=(12,7))
+    ax = fig.add_subplot(111, projection='3d')
+    surf = ax.plot_surface(F1, F2, MU, cmap='viridis', alpha=0.8)
+    ax.contour(F1, F2, MU, zdir='z', offset=MU.min(), cmap='viridis', linestyles="--")
+    fig.colorbar(surf, ax=ax, shrink=0.5, label='Predicted RMSE')
+    ax.set_xlabel(f'Feature {f1}')
+    ax.set_ylabel(f'Feature {f2}')
+    ax.set_zlabel('Predicted RMSE')
+    ax.set_title('Gaussian Process Surrogate Mean Surface')
+    plt.show()
+
+    # --- Uncertainty contour with overlayed lines ---
+    plt.figure(figsize=(10,6))
+    contour = plt.contourf(F1, F2, SIGMA, cmap='magma', alpha=0.8)
+    lines = plt.contour(F1, F2, SIGMA, colors='black', linewidths=0.5)
+    plt.clabel(lines, inline=True, fontsize=8)
+    plt.colorbar(contour, label='GP Std Dev (Uncertainty)')
+    plt.xlabel(f'Feature {f1}')
+    plt.ylabel(f'Feature {f2}')
+    plt.title('GP Uncertainty Contour')
+    plt.grid(True)
+    plt.show()
+
+    # --- Final Model Predictions with density shading ---
+    plt.figure(figsize=(8,6))
+    plt.hexbin(y_test_tensor.numpy(), preds.numpy(), gridsize=40, cmap='coolwarm', mincnt=1)
+    plt.plot([y_test_tensor.min(), y_test_tensor.max()],
+             [y_test_tensor.min(), y_test_tensor.max()], 'k--', lw=2)
+    plt.xlabel('True Values')
+    plt.ylabel('Predicted Values')
+    plt.title(f'Final Model Predictions (RMSE={rmse:.4f})')
+    plt.colorbar(label='Density of Points')
+    plt.grid(True)
+    plt.show()
+
+    # --- Residual Heatmap ---
+    residuals = preds.numpy() - y_test_tensor.numpy()
+    plt.figure(figsize=(8,6))
+    plt.scatter(y_test_tensor.numpy(), preds.numpy(), c=residuals, cmap='coolwarm', alpha=0.7)
+    plt.axhline(0, color='black', linestyle='--')
+    plt.xlabel('True Values')
+    plt.ylabel('Predicted Values')
+    plt.title('Prediction Residuals (Color = Error)')
+    plt.colorbar(label='Residual')
+    plt.grid(True)
+    plt.show()
+
+plot_everything_enhanced(surrogate, X_surrogate, y_surrogate,
+                X_test_tensor, y_test_tensor, preds, rmse)
