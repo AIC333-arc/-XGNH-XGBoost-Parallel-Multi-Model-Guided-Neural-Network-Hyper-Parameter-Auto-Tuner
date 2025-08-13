@@ -5,6 +5,10 @@ import threading
 import random
 from concurrent.futures import ThreadPoolExecutor
 from xgboost import DMatrix, Booster
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ConstantKernel as C, Matern, WhiteKernel
 from scipy.stats import norm
@@ -315,8 +319,6 @@ df_enc = encode_params(df).dropna()
 X_surrogate = df_enc.drop(columns=["rmse"]).astype(float)
 y_surrogate = df_enc["rmse"].values
 
-# Train the surrogate
-surrogate = XGB3DEnsembleSurrogateConverge(n_models=30, n_trees=100)
 # Train the surrogate
 surrogate = XGB3DEnsembleSurrogateConverge(n_models=30, n_trees=100)
 surrogate.fit(X_surrogate.values, y_surrogate)
