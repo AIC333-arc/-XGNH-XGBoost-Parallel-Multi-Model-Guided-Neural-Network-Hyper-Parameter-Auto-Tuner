@@ -1,0 +1,86 @@
+# Updated Ensemble Architecture
+
+class XGB3DEnsembleSurrogateConverge:
+    def __init__(self, n_models=5, n_trees=50, max_depth=3,
+                 learning_rate=0.2, batch_size=2, residual_learning_rate=0.5,
+                 mode="hybrid"):
+        assert mode in ["meta", "consensus", "hybrid"], "Invalid mode"
+        self.n_models = n_models
+        self.n_trees = n_trees
+        self.max_depth = max_depth
+        self.learning_rate = learning_rate
+        self.batch_size = batch_size
+        self.residual_learning_rate = residual_learning_rate
+        self.mode = mode
+        self.models = [[None]*n_trees for _ in range(n_models)]
+        self.base_score = 0.5
+        self.lock = threading.Lock()
+
+    def _get_tree_lr(self, t):
+        return self.learning_rate
+
+    def fit(self, X, y):
+        self.X = np.array(X, dtype=np.float32)
+        self.y = np.array(y, dtype=np.float32)
+        n_samples = self.X.shape[0]
+        self.model_preds = np.full((self.n_models, n_samples), self.base_score, dtype=np.float32)
+        residuals = np.zeros((self.n_models, n_samples), dtype=np.float32)
+        self.rmse_progression = []
+
+        def train_tree(m, t, res, lr):
+            dmat = DMatrix(self.X, label=res)
+            params = {"max_depth": self.max_depth, "eta": lr,
+                      "objective": "reg:squarederror", "verbosity": 0, "tree_method": "hist"}
+            bst = Booster(params, [dmat])
+            bst.update(dmat, iteration=0)
+            pred = bst.predict(dmat)
+            return m, t, bst, pred
+
+        for t in range(self.n_trees):
+            tree_lr = self._get_tree_lr(t)
+            ensemble_preds = np.mean(self.model_preds, axis=0)
+            shared_residuals = self.y - ensemble_preds
+            consensus_weight = t / self.n_trees
+
+            for batch_start in range(0, self.n_models, self.batch_size):
+                batch_end = min(batch_start + self.batch_size, self.n_models)
+                results = []
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=self.batch_size) as executor:
+                    futures = []
+                    for m in range(batch_start, batch_end):
+                        combined_residual = residuals[m].copy()
+                        if self.mode in ["meta", "hybrid"]:
+                            combined_residual += self.residual_learning_rate * shared_residuals
+                        if self.mode in ["consensus", "hybrid"]:
+                            combined_residual += self.residual_learning_rate * consensus_weight * (ensemble_preds - self.model_preds[m])
+                        futures.append(executor.submit(train_tree, m, t, combined_residual, tree_lr))
+                    for f in futures:
+                        results.append(f.result())
+
+                for m, t_idx, bst, pred in results:
+                    with self.lock:
+                        self.models[m][t_idx] = bst
+                        self.model_preds[m] += tree_lr * pred
+                        update = 0
+                        if self.mode in ["meta", "hybrid"]:
+                            update += self.residual_learning_rate * shared_residuals
+                        if self.mode in ["consensus", "hybrid"]:
+                            update += self.residual_learning_rate * consensus_weight * (ensemble_preds - self.model_preds[m])
+                        residuals[m] = residuals[m] + update - tree_lr * pred
+
+            self.rmse_progression.append(math.sqrt(mean_squared_error(self.y, np.mean(self.model_preds, axis=0))))
+        self.final_preds = np.mean(self.model_preds, axis=0)
+        return self
+
+    def predict(self, X):
+        X = np.array(X, dtype=np.float32)
+        preds = np.full((self.n_models, X.shape[0]), self.base_score, dtype=np.float32)
+        for m in range(self.n_models):
+            for bst in self.models[m]:
+                if bst is not None:
+                    preds[m] += self.learning_rate * bst.predict(DMatrix(X))
+        return np.mean(preds, axis=0)
+
+
+# Now includes a consensus terms that describes the difference between the model predictions and the ensemble predicitons.
