@@ -1,4 +1,4 @@
-# Idea developed by myself, coded by ChatGPT
+# ChatGPT helped code this. I developed the idea of using the consensus term + shared residual model to update the XGBoost model. ChatGPT designed the meta model / stacked layer.
 import threading
 import math
 import numpy as np
