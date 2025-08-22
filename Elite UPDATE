@@ -1,3 +1,4 @@
+# Idea developed by myself, coded by ChatGPT
 import threading
 import math
 import numpy as np
