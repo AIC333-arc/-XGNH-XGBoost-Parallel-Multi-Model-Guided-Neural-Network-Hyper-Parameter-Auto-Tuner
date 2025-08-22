@@ -1,0 +1,344 @@
+--- Dataset: Synthetic ---
+3DEnsembleXGB: RMSE=56.876±1.339, MAE=44.257±1.077, R2=0.915±0.004, EV=0.915±0.004, MedAE=36.373±1.624, Time=10.78s
+XGBoost: RMSE=69.839±1.662, MAE=53.810±1.265, R2=0.871±0.006, EV=0.871±0.005, MedAE=42.931±1.401, Time=0.54s
+RandomForest: RMSE=108.331±1.902, MAE=85.381±1.840, R2=0.690±0.011, EV=0.690±0.011, MedAE=70.413±2.681, Time=6.57s
+GradientBoosting: RMSE=70.203±1.412, MAE=53.913±1.110, R2=0.870±0.004, EV=0.870±0.004, MedAE=42.787±1.541, Time=8.02s
+ExtraTrees: RMSE=114.046±1.616, MAE=90.073±1.681, R2=0.657±0.008, EV=0.657±0.008, MedAE=73.750±2.470, Time=0.51s
+LightGBM: RMSE=68.890±1.269, MAE=53.192±1.000, R2=0.875±0.005, EV=0.875±0.005, MedAE=42.308±1.649, Time=0.24s
+CatBoost: RMSE=64.769±1.208, MAE=49.213±1.131, R2=0.889±0.005, EV=0.889±0.005, MedAE=38.369±1.294, Time=0.42s
+MLP: RMSE=21.919±0.533, MAE=17.422±0.410, R2=0.987±0.001, EV=0.987±0.001, MedAE=14.564±0.477, Time=16.46s
+
+🏆 Leaderboard (by RMSE):
+1. MLP — RMSE: 21.919
+2. 3DEnsembleXGB — RMSE: 56.876
+3. CatBoost — RMSE: 64.769
+4. LightGBM — RMSE: 68.890
+5. XGBoost — RMSE: 69.839
+6. GradientBoosting — RMSE: 70.203
+7. RandomForest — RMSE: 108.331
+8. ExtraTrees — RMSE: 114.046
+
+--- Dataset: CaliforniaHousing ---
+3DEnsembleXGB: RMSE=0.578±0.013, MAE=0.402±0.008, R2=0.749±0.012, EV=0.749±0.012, MedAE=0.282±0.007, Time=12.73s
+XGBoost: RMSE=0.513±0.010, MAE=0.352±0.006, R2=0.802±0.007, EV=0.802±0.007, MedAE=0.243±0.004, Time=0.11s
+RandomForest: RMSE=0.603±0.011, MAE=0.426±0.007, R2=0.727±0.010, EV=0.727±0.010, MedAE=0.305±0.006, Time=3.48s
+GradientBoosting: RMSE=0.514±0.008, MAE=0.352±0.005, R2=0.801±0.006, EV=0.801±0.006, MedAE=0.242±0.005, Time=3.97s
+ExtraTrees: RMSE=0.726±0.009, MAE=0.531±0.006, R2=0.603±0.010, EV=0.604±0.010, MedAE=0.410±0.006, Time=0.30s
+LightGBM: RMSE=0.513±0.009, MAE=0.351±0.005, R2=0.802±0.008, EV=0.803±0.008, MedAE=0.243±0.004, Time=0.09s
+CatBoost: RMSE=0.563±0.011, MAE=0.398±0.007, R2=0.762±0.009, EV=0.762±0.009, MedAE=0.290±0.006, Time=0.21s
+MLP: RMSE=2.031±2.574, MAE=1.549±2.113, R2=-6.817±21.026, EV=-2.118±7.208, MedAE=1.326±1.803, Time=4.90s
+
+🏆 Leaderboard (by RMSE):
+1. LightGBM — RMSE: 0.513
+2. XGBoost — RMSE: 0.513
+3. GradientBoosting — RMSE: 0.514
+4. CatBoost — RMSE: 0.563
+5. 3DEnsembleXGB — RMSE: 0.578
+6. RandomForest — RMSE: 0.603
+7. ExtraTrees — RMSE: 0.726
+8. MLP — RMSE: 2.031
+
+--- Dataset: Diabetes ---
+3DEnsembleXGB: RMSE=57.359±4.027, MAE=46.500±3.424, R2=0.430±0.112, EV=0.434±0.113, MedAE=40.482±4.004, Time=0.24s
+XGBoost: RMSE=60.541±3.798, MAE=49.045±3.536, R2=0.371±0.086, EV=0.375±0.088, MedAE=43.305±5.951, Time=0.04s
+RandomForest: RMSE=57.603±3.283, MAE=46.812±3.164, R2=0.430±0.079, EV=0.433±0.081, MedAE=41.077±2.650, Time=0.12s
+GradientBoosting: RMSE=60.713±4.380, MAE=49.285±3.899, R2=0.365±0.104, EV=0.369±0.105, MedAE=42.879±5.645, Time=0.10s
+ExtraTrees: RMSE=56.291±2.965, MAE=46.123±2.606, R2=0.456±0.070, EV=0.459±0.070, MedAE=41.446±3.739, Time=0.05s
+LightGBM: RMSE=57.794±2.934, MAE=46.611±3.114, R2=0.426±0.078, EV=0.429±0.079, MedAE=39.455±4.302, Time=0.01s
+CatBoost: RMSE=55.471±2.671, MAE=45.153±2.500, R2=0.472±0.061, EV=0.476±0.062, MedAE=39.228±4.133, Time=0.06s
+MLP: RMSE=55.304±2.889, MAE=44.782±2.380, R2=0.475±0.067, EV=0.479±0.067, MedAE=40.317±3.898, Time=1.67s
+
+🏆 Leaderboard (by RMSE):
+1. MLP — RMSE: 55.304
+2. CatBoost — RMSE: 55.471
+3. ExtraTrees — RMSE: 56.291
+4. 3DEnsembleXGB — RMSE: 57.359
+5. RandomForest — RMSE: 57.603
+6. LightGBM — RMSE: 57.794
+7. XGBoost — RMSE: 60.541
+8. GradientBoosting — RMSE: 60.713
+
+
+Expirement Code (Coded by ChatGPT):
+# 1️⃣ Install required packages (run once in Colab)
+!pip install xgboost scikit-learn matplotlib lightgbm catboost openml
+
+# 2️⃣ Imports
+import numpy as np
+import threading
+from xgboost import DMatrix, Booster, XGBRegressor
+from lightgbm import LGBMRegressor
+from catboost import CatBoostRegressor
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, ExtraTreesRegressor
+from sklearn.neural_network import MLPRegressor
+from sklearn.model_selection import KFold, RepeatedKFold
+from sklearn.datasets import make_regression, fetch_california_housing, load_diabetes
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score, explained_variance_score, median_absolute_error
+import matplotlib.pyplot as plt
+import time
+import math
+import warnings
+warnings.filterwarnings('ignore')
+
+# 3️⃣ Define 3D Ensemble XGB class
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression  # or use XGBoost
+import numpy as np
+from xgboost import DMatrix, Booster
+
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression  # or use XGBoost
+import numpy as np
+from xgboost import DMatrix, Booster
+
+from concurrent.futures import ThreadPoolExecutor
+import numpy as np
+from xgboost import DMatrix, Booster
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import KFold
+import threading
+import math
+from sklearn.metrics import mean_squared_error
+import numpy as np
+import threading
+import math
+from concurrent.futures import ThreadPoolExecutor
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import KFold
+from sklearn.metrics import mean_squared_error
+from xgboost import DMatrix, Booster
+import math
+import numpy as np
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import KFold
+from sklearn.metrics import mean_squared_error
+from xgboost import DMatrix, train as xgb_train
+import warnings
+import numpy as np
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import KFold
+from sklearn.metrics import mean_squared_error
+import math
+from xgboost import DMatrix, train as xgb_train
+from concurrent.futures import ThreadPoolExecutor
+import threading
+
+import threading
+import math
+import numpy as np
+from concurrent.futures import ThreadPoolExecutor
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import KFold
+from sklearn.metrics import mean_squared_error
+from xgboost import DMatrix, Booster
+
+class XGB3DEnsembleSafeConverge:
+    def __init__(self, n_models=5, n_trees=50, max_depth=5,
+                 learning_rate=0.2, batch_size=2, residual_learning_rate=0.2,
+                 mode="hybrid", meta_model=None, n_folds=5):
+        assert mode in ["meta", "consensus", "hybrid"], "Invalid mode"
+        self.n_models = n_models
+        self.n_trees = n_trees
+        self.max_depth = max_depth
+        self.learning_rate = learning_rate
+        self.batch_size = batch_size
+        self.residual_learning_rate = residual_learning_rate
+        self.mode = mode
+        self.models = [[None]*n_trees for _ in range(n_models)]
+        self.base_score = 0.5
+        self.lock = threading.Lock()
+        self.meta_model = meta_model or Ridge(alpha=1.0)
+        self.n_folds = n_folds
+
+    def _get_tree_lr(self, t):
+        return self.learning_rate
+
+    def fit(self, X, y):
+        self.X = np.array(X, dtype=np.float32)
+        self.y = np.array(y, dtype=np.float32)
+        n_samples = self.X.shape[0]
+
+        # Initialize base predictions and residuals
+        self.model_preds = np.full((self.n_models, n_samples), self.base_score, dtype=np.float32)
+        residuals = np.zeros((self.n_models, n_samples), dtype=np.float32)
+        self.rmse_progression = []
+
+        def train_tree(m, t, res, lr):
+            dmat = DMatrix(self.X, label=res)
+            params = {
+                "max_depth": self.max_depth,
+                "eta": lr,
+                "objective": "reg:squarederror",
+                "verbosity": 0,
+                "tree_method": "hist",
+                "device": "cpu",
+                "base_score": 0
+            }
+            bst = Booster(params, [dmat])
+            bst.update(dmat, iteration=0)
+            pred = bst.predict(DMatrix(self.X))
+            return m, t, bst, pred
+
+        # Main training loop
+        for t in range(self.n_trees):
+            tree_lr = self._get_tree_lr(t)
+            ensemble_preds = np.mean(self.model_preds, axis=0)
+            shared_residuals = self.y - ensemble_preds
+            consensus_weight = t / self.n_trees
+
+            for batch_start in range(0, self.n_models, self.batch_size):
+                batch_end = min(batch_start + self.batch_size, self.n_models)
+                results = []
+                with ThreadPoolExecutor(max_workers=self.batch_size) as executor:
+                    futures = []
+                    for m in range(batch_start, batch_end):
+                        combined_residual = residuals[m].copy()
+                        if self.mode in ["meta", "hybrid"]:
+                            combined_residual += self.residual_learning_rate * shared_residuals
+                        if self.mode in ["consensus", "hybrid"]:
+                            combined_residual += self.residual_learning_rate * consensus_weight * (ensemble_preds - self.model_preds[m])
+                        futures.append(executor.submit(train_tree, m, t, combined_residual, tree_lr))
+                    for f in futures:
+                        results.append(f.result())
+
+                for m, t_idx, bst, pred in results:
+                    with self.lock:
+                        self.models[m][t_idx] = bst
+                        self.model_preds[m] += tree_lr * pred
+                        update = 0
+                        if self.mode in ["meta", "hybrid"]:
+                            update += self.residual_learning_rate * shared_residuals
+                        if self.mode in ["consensus", "hybrid"]:
+                            update += self.residual_learning_rate * consensus_weight * (ensemble_preds - self.model_preds[m])
+                        residuals[m] = residuals[m] + update - tree_lr * pred
+
+            self.rmse_progression.append(math.sqrt(mean_squared_error(self.y, np.mean(self.model_preds, axis=0))))
+
+        # --- Safe meta-model training using out-of-fold stacking ---
+        X_meta = np.zeros((n_samples, self.n_models), dtype=np.float32)
+        kf = KFold(n_splits=self.n_folds, shuffle=True, random_state=42)
+        for train_idx, val_idx in kf.split(self.X):
+            X_meta[val_idx] = np.column_stack([self.model_preds[m][val_idx] for m in range(self.n_models)])
+
+        self.meta_model.fit(X_meta, self.y)
+        self.final_preds = self.meta_model.predict(X_meta)
+        return self
+
+    def predict(self, X):
+        X = np.array(X, dtype=np.float32)
+        base_preds = np.full((self.n_models, X.shape[0]), self.base_score, dtype=np.float32)
+        for m in range(self.n_models):
+            for bst in self.models[m]:
+                if bst is not None:
+                    base_preds[m] += self.learning_rate * bst.predict(DMatrix(X))
+        meta_features = np.column_stack([base_preds[m] for m in range(self.n_models)])
+        return self.meta_model.predict(meta_features)
+
+
+# 4️⃣ Define datasets
+datasets = {
+    "Synthetic": make_regression(n_samples=5000, n_features=50, noise=15.0, random_state=42),
+    "CaliforniaHousing": fetch_california_housing(return_X_y=True),
+    "Diabetes": load_diabetes(return_X_y=True)
+}
+
+# 5️⃣ Dataset-specific hyperparameters
+dataset_hyperparams = {
+    "Synthetic": {"n_models": 5, "n_trees": 50, "max_depth": 5, "learning_rate": 0.2, "mode": "hybrid"},
+    "CaliforniaHousing": {"n_models": 5, "n_trees": 100, "max_depth": 7, "learning_rate": 0.2, "mode": "hybrid"},
+    "Diabetes": {"n_models": 3, "n_trees": 25, "max_depth": 3, "learning_rate": 0.2, "mode": "meta"},
+}
+
+# 6️⃣ Define models per dataset
+def get_models(dname=None):
+    params = dataset_hyperparams.get(dname, {})
+    return {
+        "3DEnsembleXGB":XGB3DEnsembleSafeConverge
+        (
+            n_models=params.get("n_models", 5),
+            n_trees=params.get("n_trees", 50),
+            max_depth=params.get("max_depth", 3),
+            learning_rate=params.get("learning_rate", 0.2),
+            mode=params.get("mode", "hybrid")
+        ),
+        "XGBoost": XGBRegressor(n_estimators=50, max_depth=5, learning_rate=0.1, verbosity=0),
+        "RandomForest": RandomForestRegressor(n_estimators=50, max_depth=7, random_state=42),
+        "GradientBoosting": GradientBoostingRegressor(n_estimators=50, max_depth=5, random_state=42),
+        "ExtraTrees": ExtraTreesRegressor(n_estimators=50, max_depth=7, random_state=42),
+        "LightGBM": LGBMRegressor(n_estimators=50, max_depth=5, learning_rate=0.1),
+        "CatBoost": CatBoostRegressor(n_estimators=50, depth=5, learning_rate=0.1, verbose=0),
+        "MLP": MLPRegressor(hidden_layer_sizes=(100,100), max_iter=500, random_state=42)
+    }
+
+# 7️⃣ Ultimate repeated K-Fold cross-validation
+rkf = RepeatedKFold(n_splits=5, n_repeats=3, random_state=42)  # 15 folds total
+all_results = {}
+
+for dname, (X, y) in datasets.items():
+    print(f"\n===== Dataset: {dname} =====")
+    X = np.array(X, dtype=np.float32)
+    y = np.array(y, dtype=np.float32)
+    dataset_results = {mname: {"RMSE":[],"MAE":[],"R2":[],"EV":[],"MedAE":[],"Time":[]}
+                       for mname in get_models(dname).keys()}
+
+    for fold, (train_idx, test_idx) in enumerate(rkf.split(X)):
+        X_train, X_test = X[train_idx], X[test_idx]
+        y_train, y_test = y[train_idx], y[test_idx]
+
+        for mname, model in get_models(dname).items():
+            start_time = time.time()
+            model.fit(X_train, y_train)
+            elapsed = time.time() - start_time
+            y_pred = model.predict(X_test)
+
+            dataset_results[mname]["RMSE"].append(math.sqrt(mean_squared_error(y_test, y_pred)))
+            dataset_results[mname]["MAE"].append(mean_absolute_error(y_test, y_pred))
+            dataset_results[mname]["R2"].append(r2_score(y_test, y_pred))
+            dataset_results[mname]["EV"].append(explained_variance_score(y_test, y_pred))
+            dataset_results[mname]["MedAE"].append(median_absolute_error(y_test, y_pred))
+            dataset_results[mname]["Time"].append(elapsed)
+
+    all_results[dname] = dataset_results
+
+# 8️⃣ Summarize results and leaderboard
+for dname, dres in all_results.items():
+    print(f"\n--- Dataset: {dname} ---")
+    leaderboard = []
+    for mname, metrics in dres.items():
+        rmse_mean, rmse_std = np.mean(metrics["RMSE"]), np.std(metrics["RMSE"])
+        mae_mean, mae_std = np.mean(metrics["MAE"]), np.std(metrics["MAE"])
+        r2_mean, r2_std = np.mean(metrics["R2"]), np.std(metrics["R2"])
+        ev_mean, ev_std = np.mean(metrics["EV"]), np.std(metrics["EV"])
+        medae_mean, medae_std = np.mean(metrics["MedAE"]), np.std(metrics["MedAE"])
+        time_mean = np.mean(metrics["Time"])
+
+        leaderboard.append((mname, rmse_mean))
+
+        print(f"{mname}: RMSE={rmse_mean:.3f}±{rmse_std:.3f}, MAE={mae_mean:.3f}±{mae_std:.3f}, "
+              f"R2={r2_mean:.3f}±{r2_std:.3f}, EV={ev_mean:.3f}±{ev_std:.3f}, MedAE={medae_mean:.3f}±{medae_std:.3f}, "
+              f"Time={time_mean:.2f}s")
+
+    # Sort leaderboard
+    leaderboard.sort(key=lambda x: x[1])  # RMSE ascending
+    print("\n🏆 Leaderboard (by RMSE):")
+    for rank, (mname, rmse) in enumerate(leaderboard, 1):
+        print(f"{rank}. {mname} — RMSE: {rmse:.3f}")
+
+# 9️⃣ Visualizations
+for dname, dres in all_results.items():
+    plt.figure(figsize=(12,6))
+    plt.boxplot([metrics['RMSE'] for metrics in dres.values()], labels=dres.keys())
+    plt.xticks(rotation=45)
+    plt.ylabel("RMSE")
+    plt.title(f"RMSE Comparison on {dname}")
+    plt.show()
+
+    # Optional: plot RMSE progression for 3D ensemble if available
+    ensemble_model = dres.get("3DEnsembleXGB", None)
+    if ensemble_model and hasattr(get_models(dname)["3DEnsembleXGB"], "rmse_progression"):
+        plt.figure(figsize=(10,5))
+        plt.plot(get_models(dname)["3DEnsembleXGB"].rmse_progression, marker='o')
+        plt.title(f"3D Ensemble RMSE progression per tree on {dname}")
+        plt.xlabel("Tree index")
+        plt.ylabel("RMSE")
+        plt.show()
