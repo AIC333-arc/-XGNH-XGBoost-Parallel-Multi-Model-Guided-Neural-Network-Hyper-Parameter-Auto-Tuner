@@ -1,0 +1,193 @@
+# ChatGPT helped code this. I developed the idea of using the consensus term + shared residual model to update the XGBoost model. ChatGPT designed the meta model / stacked layer.
+import threading
+import math
+import numpy as np
+from concurrent.futures import ThreadPoolExecutor
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import KFold
+from sklearn.metrics import mean_squared_error
+from xgboost import DMatrix, Booster
+
+
+class XGB3DEnsembleSafeConverge:
+    def __init__(self, n_models=5, n_trees=50, max_depth=5,
+                 learning_rate=0.2, batch_size=2, residual_learning_rate=0.2,
+                 mode="hybrid", meta_model=None, n_folds=5, base_score=0.5):
+        assert mode in ["meta", "consensus", "hybrid"], "Invalid mode"
+        self.n_models = n_models
+        self.n_trees = n_trees
+        self.max_depth = max_depth
+        self.learning_rate = learning_rate
+        self.batch_size = batch_size
+        self.residual_learning_rate = residual_learning_rate
+        self.mode = mode
+        self.models = None  # will be list of lists after training
+        self.base_score = base_score
+        self.lock = threading.Lock()
+        self.meta_model = meta_model or Ridge(alpha=1.0)
+        self.n_folds = n_folds
+        self.rmse_progression = []
+
+    def _get_tree_lr(self, t):
+        return self.learning_rate
+
+    def _train_tree_on_residual(self, X_train, residual, lr):
+        """
+        Train a single-tree booster on X_train with label residual, using eta=lr.
+        Returns a Booster trained for one iteration and the predictions on X_train.
+        """
+        dmat = DMatrix(X_train, label=residual)
+        params = {
+            "max_depth": self.max_depth,
+            "eta": lr,
+            "objective": "reg:squarederror",
+            "verbosity": 0,
+            "tree_method": "hist",
+            "device": "cpu",
+            "base_score": 0.0
+        }
+        bst = Booster(params, [dmat])
+        # one iteration update to add one tree
+        bst.update(dmat, iteration=0)
+        pred = bst.predict(DMatrix(X_train))
+        return bst, pred
+
+    def _fit_no_meta(self, X, y):
+        """
+        Train the ensemble models on (X, y) WITHOUT fitting the meta-model.
+        This is used for fold-level training (to produce OOF preds) and for the final model trained on full data.
+        After this call, self.models and self.model_preds (on X) are populated.
+        """
+        X = np.array(X, dtype=np.float32)
+        y = np.array(y, dtype=np.float32)
+        n_samples = X.shape[0]
+
+        # initialize storage
+        self.models = [[None] * self.n_trees for _ in range(self.n_models)]
+        self.model_preds = np.full((self.n_models, n_samples), self.base_score, dtype=np.float32)
+        residuals = np.zeros((self.n_models, n_samples), dtype=np.float32)
+        rmse_progression = []
+
+        def train_tree_job(m, t, res, lr):
+            bst, pred = self._train_tree_on_residual(X, res, lr)
+            return m, t, bst, pred
+
+        for t in range(self.n_trees):
+            tree_lr = self._get_tree_lr(t)
+            ensemble_preds = np.mean(self.model_preds, axis=0)
+            shared_residuals = y - ensemble_preds
+            consensus_weight = t / max(1, self.n_trees)
+
+            # train in batches to allow parallelism
+            for batch_start in range(0, self.n_models, self.batch_size):
+                batch_end = min(batch_start + self.batch_size, self.n_models)
+                results = []
+                with ThreadPoolExecutor(max_workers=self.batch_size) as executor:
+                    futures = []
+                    for m in range(batch_start, batch_end):
+                        combined_residual = residuals[m].copy()
+                        if self.mode in ["meta", "hybrid"]:
+                            combined_residual += self.residual_learning_rate * shared_residuals
+                        if self.mode in ["consensus", "hybrid"]:
+                            combined_residual += self.residual_learning_rate * consensus_weight * (ensemble_preds - self.model_preds[m])
+                        futures.append(executor.submit(train_tree_job, m, t, combined_residual, tree_lr))
+                    for f in futures:
+                        results.append(f.result())
+
+                # apply results
+                for m, t_idx, bst, pred in results:
+                    with self.lock:
+                        self.models[m][t_idx] = bst
+                        # update model predictions with scaled tree output
+                        self.model_preds[m] += tree_lr * pred
+                        # compute update used to update residuals
+                        update = np.zeros_like(pred)
+                        if self.mode in ["meta", "hybrid"]:
+                            update += self.residual_learning_rate * shared_residuals
+                        if self.mode in ["consensus", "hybrid"]:
+                            update += self.residual_learning_rate * consensus_weight * (ensemble_preds - self.model_preds[m])
+                        residuals[m] = residuals[m] + update - tree_lr * pred
+
+            rmse = math.sqrt(mean_squared_error(y, np.mean(self.model_preds, axis=0)))
+            rmse_progression.append(rmse)
+
+        # store progression if this is final full-data fit
+        self.rmse_progression = rmse_progression
+        return
+
+    def fit(self, X, y):
+        """
+        True OOF stacking:
+         - For each fold: train ensemble on train fold (using _fit_no_meta), predict on val fold -> fill X_meta[val_idx]
+         - Fit meta_model on OOF preds (X_meta)
+         - Retrain ensemble on full data (so final self.models are trained on all data)
+        """
+        self.X = np.array(X, dtype=np.float32)
+        self.y = np.array(y, dtype=np.float32)
+        n_samples = self.X.shape[0]
+
+        # Prepare OOF matrix
+        X_meta = np.zeros((n_samples, self.n_models), dtype=np.float32)
+        kf = KFold(n_splits=self.n_folds, shuffle=True, random_state=42)
+
+        # Build OOF predictions fold-by-fold
+        for fold_idx, (train_idx, val_idx) in enumerate(kf.split(self.X)):
+            X_train, y_train = self.X[train_idx], self.y[train_idx]
+            X_val = self.X[val_idx]
+
+            # Train ensemble on the train fold only
+            fold_ens = XGB3DEnsembleSafeConverge(
+                n_models=self.n_models,
+                n_trees=self.n_trees,
+                max_depth=self.max_depth,
+                learning_rate=self.learning_rate,
+                batch_size=self.batch_size,
+                residual_learning_rate=self.residual_learning_rate,
+                mode=self.mode,
+                meta_model=Ridge(alpha=1.0),
+                n_folds=self.n_folds,
+                base_score=self.base_score
+            )
+            # train ensemble on fold train data (no meta)
+            fold_ens._fit_no_meta(X_train, y_train)
+
+            # predict on validation fold using the fold ensemble (per-base-model predictions)
+            val_preds_per_model = []
+            for m in range(self.n_models):
+                preds = np.full(X_val.shape[0], self.base_score, dtype=np.float32)
+                for bst in fold_ens.models[m]:
+                    if bst is not None:
+                        preds += self.learning_rate * bst.predict(DMatrix(X_val))
+                val_preds_per_model.append(preds)
+            val_preds_per_model = np.column_stack(val_preds_per_model)  # shape (len(val_idx), n_models)
+
+            # Save into OOF meta matrix
+            X_meta[val_idx] = val_preds_per_model
+
+        # Fit the meta-model on OOF preds (now truly OOF)
+        self.meta_model.fit(X_meta, self.y)
+
+        # Finally, retrain ensemble on full data to get final base models for serving
+        self._fit_no_meta(self.X, self.y)
+
+        # For convenience, compute final stacked predictions on training data
+        # Build full-data base predictions for meta features
+        base_preds_full = np.full((self.n_models, n_samples), self.base_score, dtype=np.float32)
+        for m in range(self.n_models):
+            for bst in self.models[m]:
+                if bst is not None:
+                    base_preds_full[m] += self.learning_rate * bst.predict(DMatrix(self.X))
+        meta_features_full = np.column_stack([base_preds_full[m] for m in range(self.n_models)])
+        self.final_preds = self.meta_model.predict(meta_features_full)
+        return self
+
+    def predict(self, X):
+        X = np.array(X, dtype=np.float32)
+        n_samples = X.shape[0]
+        base_preds = np.full((self.n_models, n_samples), self.base_score, dtype=np.float32)
+        for m in range(self.n_models):
+            for bst in self.models[m]:
+                if bst is not None:
+                    base_preds[m] += self.learning_rate * bst.predict(DMatrix(X))
+        meta_features = np.column_stack([base_preds[m] for m in range(self.n_models)])
+        return self.meta_model.predict(meta_features)
