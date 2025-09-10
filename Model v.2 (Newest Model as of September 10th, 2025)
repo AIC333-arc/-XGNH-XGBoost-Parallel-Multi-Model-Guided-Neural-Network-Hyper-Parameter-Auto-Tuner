@@ -1,4 +1,5 @@
 # ChatGPT helped code this. I developed the idea of using the consensus term + shared residual model to update the XGBoost model. ChatGPT designed the meta model / stacked layer.
+# Note that while model v2 corectly uses OOF predictions, model v1 is faster and more accurate.
 import threading
 import math
 import numpy as np
